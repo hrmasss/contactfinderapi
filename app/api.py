@@ -21,6 +21,10 @@ class CompanyRequest(BaseModel):
 
 class EmployeeRequest(CompanyRequest):
     employee_name: str = Field(..., description="Employee name")
+    status_level: str = Field(
+        "risky",
+        description="Minimum email status to return: valid, risky, unknown, invalid",
+    )
 
 
 class CompanyResponse(BaseModel):
@@ -111,6 +115,19 @@ async def save_employee_emails_to_cache(
 
 
 # ======================================
+# UTILITY FUNCTIONS
+# ======================================
+
+
+def filter_emails_by_status(emails, status_level):
+    allowed = ["valid", "risky", "unknown", "invalid"]
+    if status_level not in allowed:
+        status_level = "risky"
+    min_idx = allowed.index(status_level)
+    return [e for e in emails if e.status in allowed[: min_idx + 1]]
+
+
+# ======================================
 # API FACTORY
 # ======================================
 
@@ -173,7 +190,7 @@ def create_api(finder) -> FastAPI:
             employee_name = request.employee_name.strip()
             cache_hit = False
 
-            # Get company info (cached or fresh)
+            # Get company info
             company_cache = None
             if request.use_cache and not request.force_refresh:
                 cached_company = await get_cached_company(company_name)
@@ -189,14 +206,15 @@ def create_api(finder) -> FastAPI:
                         cached_emails = [
                             email.to_email() for email in cached_employee.emails
                         ]
-
+                        filtered_emails = filter_emails_by_status(
+                            cached_emails, getattr(request, "status_level", "risky")
+                        )
                         result = ContactResult(
                             company=company_cache,
                             employee_name=employee_name,
-                            emails=cached_emails,
+                            emails=filtered_emails,
                             cache_used=True,
                         )
-
                         return EmployeeResponse(
                             success=True,
                             data=result,
@@ -204,7 +222,7 @@ def create_api(finder) -> FastAPI:
                             cache_hit=True,
                         )
 
-            # Find contacts (using cache if available)
+            # Find contacts
             result = finder.find_contacts(
                 company_name=company_name,
                 employee_name=employee_name,
@@ -212,8 +230,16 @@ def create_api(finder) -> FastAPI:
                 company_cache=company_cache,
             )
 
+            # Save all emails to cache (before filtering)
+            all_emails = list(result.emails)
+
+            # Filter emails by status_level for API response only
+            result.emails = filter_emails_by_status(
+                result.emails, getattr(request, "status_level", "risky")
+            )
+
             # Save to cache in background
-            if request.use_cache and result.emails:
+            if request.use_cache and all_emails:
                 if not company_cache:
                     company_db = await save_company_to_cache(result.company)
                 else:
@@ -224,7 +250,7 @@ def create_api(finder) -> FastAPI:
                         save_employee_emails_to_cache,
                         company_db,
                         employee_name,
-                        result.emails,
+                        all_emails,
                     )
 
             return EmployeeResponse(
