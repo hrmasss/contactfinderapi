@@ -78,12 +78,12 @@ def main():
     print()
 
     try:
-        app = create_app()
         uvicorn.run(
-            app,
+            "main:create_app",
             host=host,
             port=port,
             reload=debug,
+            factory=True,
             log_level="info" if debug else "warning",
         )
     except KeyboardInterrupt:

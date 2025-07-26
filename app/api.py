@@ -10,16 +10,17 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks
 # ======================================
 
 
-class ContactRequest(BaseModel):
-    """Request model for contact finding"""
-
+class CompanyRequest(BaseModel):
     company_name: str = Field(..., description="Company name to search for")
-    employee_name: Optional[str] = Field(None, description="Employee name (optional)")
     context: Optional[Dict[str, Any]] = Field(
         default_factory=dict, description="Additional context"
     )
     use_cache: bool = Field(True, description="Whether to use cached data")
     force_refresh: bool = Field(False, description="Force refresh cached data")
+
+
+class EmployeeRequest(CompanyRequest):
+    employee_name: str = Field(..., description="Employee name")
 
 
 class CompanyResponse(BaseModel):
@@ -124,7 +125,7 @@ def create_api(finder) -> FastAPI:
     )
 
     @app.post("/company", response_model=CompanyResponse)
-    async def find_company(request: ContactRequest, background_tasks: BackgroundTasks):
+    async def find_company(request: CompanyRequest, background_tasks: BackgroundTasks):
         """Find company information only"""
         try:
             company_name = request.company_name.strip()
@@ -163,16 +164,13 @@ def create_api(finder) -> FastAPI:
             )
 
     @app.post("/employee", response_model=EmployeeResponse)
-    async def find_employee(request: ContactRequest, background_tasks: BackgroundTasks):
+    async def find_employee(
+        request: EmployeeRequest, background_tasks: BackgroundTasks
+    ):
         """Find employee contacts (company + employee)"""
         try:
             company_name = request.company_name.strip()
-            employee_name = request.employee_name
-
-            if not employee_name:
-                raise HTTPException(status_code=400, detail="Employee name is required")
-
-            employee_name = employee_name.strip()
+            employee_name = request.employee_name.strip()
             cache_hit = False
 
             # Get company info (cached or fresh)
