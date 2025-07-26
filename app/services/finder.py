@@ -383,11 +383,20 @@ class ContactFinder(ContactFinder):
                 domains=[f"{company_name.lower().replace(' ', '')}.com"],
             )
 
-        # Search for company information
+        context_str = ""
+        if context:
+            context_items = [
+                f"{k}: {v}"
+                for k, v in context.items()
+                if v and k in {"location", "industry", "linkedin", "website"}
+            ]
+            if context_items:
+                context_str = ", ".join(context_items)
+
         search_queries = [
-            f'"{company_name}" official website company information',
-            f'"{company_name}" email contact directory employees',
-            f'"{company_name}" email pattern format structure',
+            f'"{company_name}" {context_str} official website company information'.strip(),
+            f'"{company_name}" {context_str} email contact directory employees'.strip(),
+            f'"{company_name}" {context_str} email pattern format structure'.strip(),
         ]
 
         all_results = ""
@@ -402,7 +411,7 @@ class ContactFinder(ContactFinder):
 
         # Use structured output from LLM
         prompt = f"""
-        Analyze the following search results for company "{company_name}" and extract structured information.
+        Analyze the following search results for company \"{company_name}\"{f" with context: {context_str}" if context_str else ""} and extract structured information.
 
         Search Results:
         {all_results[:2000]}
@@ -411,7 +420,7 @@ class ContactFinder(ContactFinder):
         1. Official website URL
         2. Brief company description (1-2 sentences)
         3. Likely email domains (from website and found emails)
-        4. Email patterns mentioned in the text (like "firstname.lastname@company.com")
+        4. Email patterns mentioned in the text (like \"first.last@company.com\")
 
         Return the information in the exact JSON format specified.
         """
