@@ -254,7 +254,7 @@ class DomainValidator(EmailValidator):
 # ======================================
 
 
-class SimpleContactFinder(ContactFinder):
+class ContactFinder(ContactFinder):
     """Contact finder"""
 
     def __init__(self, config: ContactFinderConfig):
@@ -449,6 +449,6 @@ class SimpleContactFinder(ContactFinder):
 # ======================================
 
 
-def create_contact_finder(config: ContactFinderConfig) -> SimpleContactFinder:
+def create_contact_finder(config: ContactFinderConfig) -> ContactFinder:
     """Factory function"""
-    return SimpleContactFinder(config)
+    return ContactFinder(config)
