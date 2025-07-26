@@ -294,25 +294,52 @@ class EmailBounceValidator(EmailValidator):
     def name(self) -> str:
         return "email_bounce"
 
+    def __init__(self, config=None):
+        import logging
+
+        self.callback = getattr(config, "bounce_callback", None) if config else None
+        self.logger = logging.getLogger("EmailBounceValidator")
+
     def validate(self, email: str, company_info: CompanyInfo = None) -> str:
         from os import getenv
         import requests
+        import time
 
-        api_key = getenv("EMAIL_BOUNCE_API_KEY")
-        if not api_key or not email or "@" not in email:
-            return None
-        try:
+        def send_and_check(email, company_info):
+            api_key = getenv("EMAIL_BOUNCE_API_KEY")
+            if not api_key or not email or "@" not in email:
+                return
             headers = {"Email-API-Key": api_key}
             data = {"recipient_email": email}
-            # Fire and forget (non-blocking)
-            threading.Thread(
-                target=requests.post,
-                args=("http://194.113.195.63:8000/send-email/",),
-                kwargs={"headers": headers, "json": data, "timeout": 5},
-            ).start()
-        except Exception:
-            pass
-        # Do not change status
+            try:
+                resp = requests.post(
+                    "http://194.113.195.63:8000/send-email/",
+                    headers=headers,
+                    json=data,
+                    timeout=5,
+                )
+                if resp.status_code == 200 and resp.json().get("mail_sent"):
+                    time.sleep(300)
+                    status_resp = requests.get(
+                        "http://194.113.195.63:8000/check-status/",
+                        headers=headers,
+                        params={"recipient_email": email},
+                        timeout=5,
+                    )
+                    if status_resp.status_code == 200:
+                        result = status_resp.json()
+                        status = result.get("status")
+                        if status in ("valid", "invalid"):
+                            if self.callback:
+                                self.callback(email, status, company_info)
+                            else:
+                                self.logger.warning(
+                                    "No bounce_callback provided in config; skipping additional steps."
+                                )
+            except Exception:
+                pass
+
+        threading.Thread(target=send_and_check, args=(email, company_info)).start()
         return None
 
 
@@ -342,7 +369,7 @@ class ContactFinder(ContactFinder):
         if self.config.enable_email_checker:
             validators.append(EmailCheckerValidator())
         if self.config.enable_email_bounceback:
-            validators.append(EmailBounceValidator())
+            validators.append(EmailBounceValidator(config=self.config))
         return validators
 
     def find_company_info(

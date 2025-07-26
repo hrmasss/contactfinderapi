@@ -93,6 +93,8 @@ class ContactFinderConfig(BaseModel):
     enable_domain_validation: bool = True
     enable_email_checker: bool = True
     enable_email_bounceback: bool = True
+    # Optional callback for bounce status updates
+    bounce_callback: Optional[callable] = None
 
     # Generation settings
     max_emails: int = 15
