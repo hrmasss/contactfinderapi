@@ -1,3 +1,4 @@
+import threading
 import os
 import re
 import time
@@ -286,6 +287,35 @@ class EmailCheckerValidator(EmailValidator):
             return "unknown"
 
 
+class EmailBounceValidator(EmailValidator):
+    """Validator that triggers a bounce check email, but does not block or change status immediately."""
+
+    @property
+    def name(self) -> str:
+        return "email_bounce"
+
+    def validate(self, email: str, company_info: CompanyInfo = None) -> str:
+        from os import getenv
+        import requests
+
+        api_key = getenv("EMAIL_BOUNCE_API_KEY")
+        if not api_key or not email or "@" not in email:
+            return None
+        try:
+            headers = {"Email-API-Key": api_key}
+            data = {"recipient_email": email}
+            # Fire and forget (non-blocking)
+            threading.Thread(
+                target=requests.post,
+                args=("http://194.113.195.63:8000/send-email/",),
+                kwargs={"headers": headers, "json": data, "timeout": 5},
+            ).start()
+        except Exception:
+            pass
+        # Do not change status
+        return None
+
+
 # ======================================
 # CONTACT FINDER
 # ======================================
@@ -309,8 +339,10 @@ class ContactFinder(ContactFinder):
             validators.append(MXValidator())
         if self.config.enable_domain_validation:
             validators.append(DomainValidator())
-        if self.config.enable_emails_checker:
+        if self.config.enable_email_checker:
             validators.append(EmailCheckerValidator())
+        if self.config.enable_email_bounceback:
+            validators.append(EmailBounceValidator())
         return validators
 
     def find_company_info(
@@ -471,7 +503,8 @@ class ContactFinder(ContactFinder):
             for validator in self.validators:
                 if email.status in ("unknown", "risky"):
                     status = validator.validate(email.address, company_info)
-                    if status != "unknown":
+                    # Only update status if validator returns a new status
+                    if status is not None and status != "unknown":
                         email.status = status
                         if status == "invalid":
                             email.confidence *= 0.1

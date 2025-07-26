@@ -91,7 +91,8 @@ class ContactFinderConfig(BaseModel):
     # Feature toggles
     enable_mx_validation: bool = True
     enable_domain_validation: bool = True
-    enable_emails_checker: bool = True
+    enable_email_checker: bool = True
+    enable_email_bounceback: bool = True
 
     # Generation settings
     max_emails: int = 15
