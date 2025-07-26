@@ -1,4 +1,3 @@
-# ContactFinder Core - Clean, focused implementation with Pydantic
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Dict
 from abc import ABC, abstractmethod
@@ -91,8 +90,8 @@ class ContactFinderConfig(BaseModel):
 
     # Feature toggles
     enable_mx_validation: bool = True
-    enable_external_validation: bool = False
     enable_domain_validation: bool = True
+    enable_emails_checker: bool = True
 
     # Generation settings
     max_emails: int = 15

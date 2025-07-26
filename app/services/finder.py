@@ -1,5 +1,7 @@
+import os
 import re
 import time
+import requests
 import dns.resolver
 from typing import List, Optional, Dict
 from langchain_openai import ChatOpenAI
@@ -249,6 +251,41 @@ class DomainValidator(EmailValidator):
         return "invalid"
 
 
+class EmailCheckerValidator(EmailValidator):
+    """Validator using emails-checker.net API"""
+
+    @property
+    def name(self) -> str:
+        return "emails_checker"
+
+    def validate(self, email: str, company_info: CompanyInfo = None) -> str:
+        api_key = os.getenv("EMAIL_CHECKER_API_KEY")
+        if not api_key or not email or "@" not in email:
+            return "unknown"
+        try:
+            resp = requests.get(
+                "https://api.emails-checker.net/check",
+                params={"access_key": api_key, "email": email},
+                timeout=5,
+            )
+            if resp.status_code != 200:
+                return "unknown"
+            data = resp.json()
+            if not data.get("success") or "response" not in data:
+                return "unknown"
+            result = data["response"].get("result", "unknown")
+            # Map API result to our status
+            if result == "deliverable":
+                return "valid"
+            if result == "undeliverable":
+                return "invalid"
+            if result == "risky":
+                return "risky"
+            return "unknown"
+        except Exception:
+            return "unknown"
+
+
 # ======================================
 # CONTACT FINDER
 # ======================================
@@ -268,13 +305,12 @@ class ContactFinder(ContactFinder):
     def _create_validators(self) -> List[EmailValidator]:
         """Create validation pipeline"""
         validators = []
-
         if self.config.enable_mx_validation:
             validators.append(MXValidator())
-
         if self.config.enable_domain_validation:
             validators.append(DomainValidator())
-
+        if self.config.enable_emails_checker:
+            validators.append(EmailCheckerValidator())
         return validators
 
     def find_company_info(
