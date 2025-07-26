@@ -3,11 +3,11 @@ import sys
 import uvicorn
 from fastapi import FastAPI
 from dotenv import load_dotenv
-from app.api import create_api
 from app.models import get_tortoise_config
 from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
 from tortoise.contrib.fastapi import RegisterTortoise
+from app.api import create_api, bounce_status_callback
 from app.services import ContactFinderConfig, create_contact_finder
 
 
@@ -40,6 +40,9 @@ def create_app() -> FastAPI:
         email_verifier_key=os.getenv("EMAIL_VERIFIER_KEY"),
         enable_mx_validation=True,
         enable_domain_validation=True,
+        enable_email_checker=True,
+        enable_email_bounceback=True,
+        bounce_callback=bounce_status_callback,
         max_emails=15,
     )
 
