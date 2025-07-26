@@ -108,14 +108,11 @@ class ContactFinderConfig(BaseModel):
             "flast@domain.com",
             "lastf@domain.com",
             "firstl@domain.com",
-            "f.last@domain.com",
             "fl@domain.com",
+            "f.last@domain.com",
             "last@domain.com",
             "first_last@domain.com",
             "f_last@domain.com",
-            "first.last@domain.com",
-            "first_last@domain.com",
-            "firstlast@domain.com",
             "first.l@domain.com",
         ]
     )

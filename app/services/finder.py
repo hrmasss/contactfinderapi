@@ -356,7 +356,35 @@ class ContactFinder(ContactFinder):
         self.llm = ChatOpenAI(
             model="gpt-4o-mini", temperature=0, api_key=config.openai_api_key
         )
-        self.search = GoogleSerperAPIWrapper() if config.serper_api_key else None
+
+        # Add search agent capability
+        if config.serper_api_key:
+            self.search_api = GoogleSerperAPIWrapper()
+            try:
+                from langchain.agents import create_react_agent
+                from langchain.tools import Tool
+
+                class SearchTools:
+                    def __init__(self, search_api):
+                        self.search_api = search_api
+
+                    def get_tools(self):
+                        return [
+                            Tool(
+                                name="Google Search",
+                                func=self.search_api.run,
+                                description="Useful for searching the web for company information, domains, and contact details.",
+                            )
+                        ]
+
+                self.search_tools = SearchTools(self.search_api)
+                self.agent = create_react_agent(self.llm, self.search_tools.get_tools())
+            except Exception:
+                self.agent = None
+        else:
+            self.search_api = None
+            self.agent = None
+
         self.validators = self._create_validators()
 
     def _create_validators(self) -> List[EmailValidator]:
@@ -375,9 +403,9 @@ class ContactFinder(ContactFinder):
     def find_company_info(
         self, company_name: str, context: Optional[Dict] = None
     ) -> CompanyInfo:
-        """Find company information with structured LLM output"""
+        """Find company information with structured LLM output and agent search ability"""
 
-        if not self.search:
+        if not (self.search_api or self.agent):
             return CompanyInfo(
                 name=company_name,
                 domains=[f"{company_name.lower().replace(' ', '')}.com"],
@@ -403,24 +431,35 @@ class ContactFinder(ContactFinder):
         all_results = ""
         found_emails = []
 
+        # Use agent if available, otherwise fallback to direct search
         for query in search_queries:
-            result = self.search.run(query)
+            if self.agent:
+                try:
+                    result = self.agent.invoke(query)
+                except Exception:
+                    result = self.search_api.run(query) if self.search_api else ""
+            elif self.search_api:
+                result = self.search_api.run(query)
+            else:
+                result = ""
             all_results += f" {result}"
             emails = EmailUtils.extract_emails(result)
             found_emails.extend(emails)
             time.sleep(1)  # Rate limiting
 
-        # Use structured output from LLM
+        # Use structured output from LLM with improved prompt
         prompt = f"""
-        Analyze the following search results for company \"{company_name}\"{f" with context: {context_str}" if context_str else ""} and extract structured information.
+        Analyze the following search results for the company \"{company_name}\"{f" with context: {context_str}" if context_str else ""} and extract structured information.
+
+        IMPORTANT: Only extract domains and information that are directly and unambiguously associated with the intended company. If there are multiple companies with similar names, use the provided context (such as location, industry, website, or LinkedIn) to exclude domains belonging to other companies. Do NOT include domains that are not clearly linked to the target company.
 
         Search Results:
         {all_results[:2000]}
 
         Extract:
-        1. Official website URL
+        1. Official website URL (must match the target company)
         2. Brief company description (1-2 sentences)
-        3. Likely email domains (from website and found emails)
+        3. Likely email domains (from website and found emails, but only if they are clearly for the correct company)
 
         Return the information in the exact JSON format specified.
         """
