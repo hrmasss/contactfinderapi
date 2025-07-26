@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
 from tortoise.contrib.fastapi import RegisterTortoise
 from fastapi import FastAPI, HTTPException, BackgroundTasks
-from models import Company, Employee, EmployeeEmail, get_tortoise_config
+from app.models import Company, Employee, EmployeeEmail, get_tortoise_config
 from services import (
     ContactFinderConfig,
     create_contact_finder,
