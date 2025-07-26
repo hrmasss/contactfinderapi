@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "contactfinderapi"
+version = "0.1.0"
+description = "Find email domain & employee contact."
+authors = ["Hojayfa Rahman <hojayfarahman@gmail.com>"]
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.12"
+python-dotenv = "^1.0.1"
+langchain = "^0.3.27"
+langchain-openai = "^0.3.28"
+langchain-community = "^0.3.27"
+langgraph = "^0.5.4"
+dnspython = "^2.7.0"
+pydantic = "^2.11.7"
+email-validator = "^2.2.0"
+pydantic-settings = "^2.10.1"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.5"
+factory-boy = "^3.3.3"
