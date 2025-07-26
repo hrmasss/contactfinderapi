@@ -30,7 +30,7 @@ class Company(Model):
 
     def to_company_info(self):
         """Convert to Pydantic CompanyInfo model"""
-        from services.core import CompanyInfo
+        from .services import CompanyInfo
 
         return CompanyInfo(
             name=self.name,
@@ -94,7 +94,7 @@ class EmployeeEmail(Model):
 
     def to_email(self):
         """Convert to Pydantic Email model"""
-        from services.core import Email
+        from .services import Email
 
         return Email(
             address=self.address,
@@ -112,7 +112,7 @@ def get_tortoise_config(db_url: str = "sqlite://db.sqlite3", testing: bool = Fal
 
     return generate_config(
         db_url,
-        app_modules={"models": ["models"]},
+        app_modules={"models": ["app.models"]},
         testing=testing,
         connection_label="models",
     )
