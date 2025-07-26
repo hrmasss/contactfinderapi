@@ -72,7 +72,7 @@ class EmployeeEmail(Model):
     id = fields.IntField(primary_key=True)
     address = fields.CharField(max_length=255)
     confidence = fields.FloatField()
-    pattern_type = fields.CharField(max_length=50, default="generated")
+    pattern = fields.CharField(max_length=100, default="")
     status = fields.CharField(
         max_length=20, default="unknown"
     )  # unknown, valid, invalid, risky
@@ -99,7 +99,7 @@ class EmployeeEmail(Model):
         return Email(
             address=self.address,
             confidence=self.confidence,
-            pattern_type=self.pattern_type,
+            pattern=self.pattern,
             status=self.status,
             domain=self.domain,
         )

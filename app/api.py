@@ -107,7 +107,7 @@ async def save_employee_emails_to_cache(
             employee=employee,
             address=email.address,
             confidence=email.confidence,
-            pattern_type=email.pattern_type,
+            pattern=email.pattern,
             status=email.status,
             domain=email.domain,
         )

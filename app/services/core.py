@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 class Email(BaseModel):
     address: str
     confidence: float = Field(ge=0.0, le=1.0)
-    pattern_type: str = "generated"
+    pattern: str = ""
     status: str = "unknown"  # unknown, valid, invalid, risky
     domain: str = ""
 
@@ -44,7 +44,6 @@ class CompanyResearchResult(BaseModel):
     website: str = ""
     description: str = ""
     likely_domains: List[str] = Field(default_factory=list)
-    found_patterns: List[str] = Field(default_factory=list)
 
 
 class EmailGenerationResult(BaseModel):
@@ -97,7 +96,7 @@ class ContactFinderConfig(BaseModel):
     bounce_callback: Optional[Callable[..., Any]] = None
 
     # Generation settings
-    max_emails: int = 15
+    max_emails: int = 20
     max_domains: int = 5
 
     # Essential patterns - will be merged with publicly found ones
@@ -106,17 +105,17 @@ class ContactFinderConfig(BaseModel):
             "first.last@domain.com",
             "first@domain.com",
             "firstlast@domain.com",
-            "f.last@domain.com",
             "flast@domain.com",
+            "lastf@domain.com",
             "firstl@domain.com",
+            "f.last@domain.com",
+            "fl@domain.com",
+            "last@domain.com",
             "first_last@domain.com",
             "f_last@domain.com",
             "first.last@domain.com",
             "first_last@domain.com",
             "firstlast@domain.com",
-            "last@domain.com",
-            "lastf@domain.com",
-            "fl@domain.com",
             "first.l@domain.com",
         ]
     )

@@ -43,7 +43,7 @@ def create_app() -> FastAPI:
         enable_email_checker=True,
         enable_email_bounceback=True,
         bounce_callback=bounce_status_callback,
-        max_emails=15,
+        max_emails=20,
     )
 
     finder = create_contact_finder(config)

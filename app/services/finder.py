@@ -381,6 +381,7 @@ class ContactFinder(ContactFinder):
             return CompanyInfo(
                 name=company_name,
                 domains=[f"{company_name.lower().replace(' ', '')}.com"],
+                patterns=self.config.essential_patterns.copy(),
             )
 
         context_str = ""
@@ -420,33 +421,20 @@ class ContactFinder(ContactFinder):
         1. Official website URL
         2. Brief company description (1-2 sentences)
         3. Likely email domains (from website and found emails)
-        4. Email patterns mentioned in the text (like \"first.last@company.com\")
 
         Return the information in the exact JSON format specified.
         """
 
         try:
-            # Use structured output
             structured_llm = self.llm.with_structured_output(CompanyResearchResult)
             result = structured_llm.invoke(prompt)
 
-            # Extract patterns from text and emails
-            text_patterns = PatternEngine.extract_patterns_from_text(all_results)
-            email_patterns = PatternEngine.extract_patterns_from_emails(found_emails)
-
-            # Merge publicly found patterns (prioritize these)
-            all_patterns = list(
-                set(text_patterns + email_patterns + result.found_patterns)
-            )
-
-            # Clean domains
             clean_domains = []
             for domain in result.likely_domains:
                 clean_domain = EmailUtils.extract_domain(domain)
                 if clean_domain:
                     clean_domains.append(clean_domain)
 
-            # Add domains from found emails
             for email in found_emails:
                 if "@" in email:
                     domain = email.split("@")[1]
@@ -461,30 +449,28 @@ class ContactFinder(ContactFinder):
                 if result.website
                 else "",
                 domains=clean_domains[: self.config.max_domains],
-                patterns=all_patterns,
+                patterns=self.config.essential_patterns.copy(),
                 description=result.description,
                 found_emails=found_emails,
             )
 
         except Exception as e:
             print(f"LLM structured output failed: {e}")
-            # Fallback
             return CompanyInfo(
                 name=company_name,
                 domains=[f"{company_name.lower().replace(' ', '')}.com"],
-                patterns=PatternEngine.extract_patterns_from_text(all_results),
+                patterns=self.config.essential_patterns.copy(),
                 found_emails=found_emails,
             )
 
     def find_employee_emails(
         self, employee_name: str, company_info: CompanyInfo
     ) -> List[Email]:
-        """Generate employee emails with structured output"""
+        """Generate employee emails"""
 
         if not company_info.domains:
             return []
 
-        # Parse name
         name_parts = employee_name.lower().strip().split()
         if len(name_parts) < 2:
             return []
@@ -492,13 +478,8 @@ class ContactFinder(ContactFinder):
         first_name = name_parts[0]
         last_name = name_parts[-1]
 
-        # Merge patterns: publicly found first, then essential patterns
-        all_patterns = company_info.patterns.copy()
-        for pattern in self.config.essential_patterns:
-            if pattern not in all_patterns:
-                all_patterns.append(pattern)
+        all_patterns = self.config.essential_patterns
 
-        # Generate emails
         emails = []
         seen = set()
 
@@ -507,16 +488,11 @@ class ContactFinder(ContactFinder):
                 email_address = PatternEngine.apply_pattern(
                     pattern, first_name, last_name, domain
                 )
-
                 if email_address in seen:
                     continue
                 seen.add(email_address)
 
-                # Calculate confidence: publicly found patterns get higher confidence
-                is_public_pattern = pattern in company_info.patterns
-                base_confidence = 0.9 if is_public_pattern else 0.7
-
-                # Domain and position penalties
+                base_confidence = 0.5
                 domain_penalty = i * 0.1
                 pattern_penalty = j * 0.02
                 confidence = max(
@@ -527,9 +503,8 @@ class ContactFinder(ContactFinder):
                     Email(
                         address=email_address,
                         confidence=confidence,
-                        pattern_type="public_pattern"
-                        if is_public_pattern
-                        else "essential_pattern",
+                        pattern=pattern,
+                        status="unknown",
                         domain=domain,
                     )
                 )
@@ -539,7 +514,6 @@ class ContactFinder(ContactFinder):
             for validator in self.validators:
                 if email.status in ("unknown", "risky"):
                     status = validator.validate(email.address, company_info)
-                    # Only update status if validator returns a new status
                     if status is not None and status != "unknown":
                         email.status = status
                         if status == "invalid":
@@ -549,7 +523,17 @@ class ContactFinder(ContactFinder):
                     if status in ("valid", "invalid"):
                         break
 
-        # Sort by confidence and return top results
+        # After validation, update company_info.patterns
+        company_info.patterns = list(
+            {
+                pattern
+                for email, pattern in zip(
+                    emails, all_patterns * len(company_info.domains)
+                )
+                if email.status in ("valid", "risky", "unknown")
+            }
+        )
+
         emails.sort(key=lambda x: x.confidence, reverse=True)
         return emails[: self.config.max_emails]
 
