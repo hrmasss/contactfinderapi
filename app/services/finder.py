@@ -469,11 +469,16 @@ class ContactFinder(ContactFinder):
         # Apply validation pipeline
         for email in emails:
             for validator in self.validators:
-                if email.status == "unknown":
+                if email.status in ("unknown", "risky"):
                     status = validator.validate(email.address, company_info)
-                    if status == "invalid":
-                        email.confidence *= 0.1
+                    if status != "unknown":
                         email.status = status
+                        if status == "invalid":
+                            email.confidence *= 0.1
+                        elif status == "valid":
+                            email.confidence = min(1.0, email.confidence * 1.1)
+                    if status in ("valid", "invalid"):
+                        break
 
         # Sort by confidence and return top results
         emails.sort(key=lambda x: x.confidence, reverse=True)

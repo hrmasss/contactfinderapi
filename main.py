@@ -1,4 +1,5 @@
 import os
+import sys
 import uvicorn
 from fastapi import FastAPI
 from dotenv import load_dotenv
@@ -93,5 +94,5 @@ def main():
         exit(1)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__" and not sys.argv[0].endswith("spawn.py"):
     main()
