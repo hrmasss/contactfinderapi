@@ -30,8 +30,14 @@ class EmployeeEmailSearchResult(BaseModel):
     """Structured result for employee email search"""
 
     found_emails: List[str] = Field(description="Publicly found email addresses")
+    found_email_patterns: List[str] = Field(
+        description="Inferred patterns from found emails"
+    )
     generated_emails: List[str] = Field(
         description="Generated email addresses based on patterns"
+    )
+    generated_email_patterns: List[str] = Field(
+        description="Patterns used to generate each email"
     )
     confidence_scores: List[float] = Field(
         description="Confidence scores for each email (0.0-1.0)"
@@ -114,7 +120,7 @@ class EmailUtils:
 
 
 # ======================================
-# EMAIL GENERATION ENGINE
+# SMART EMAIL GENERATION ENGINE
 # ======================================
 
 
@@ -171,9 +177,15 @@ class EmailGenerator:
         remaining_slots = max_emails - len(found_emails)
 
         if remaining_slots <= 0:
+            # Still need to analyze found email patterns
+            found_patterns = self._analyze_found_email_patterns(
+                found_emails, essential_patterns
+            )
             return EmployeeEmailSearchResult(
                 found_emails=found_emails[:max_emails],
+                found_email_patterns=found_patterns[:max_emails],
                 generated_emails=[],
+                generated_email_patterns=[],
                 confidence_scores=[0.95] * min(len(found_emails), max_emails),
                 reasoning="Sufficient emails found publicly",
             )
@@ -196,16 +208,22 @@ class EmailGenerator:
 
             # Combine and validate results
             all_emails = found_emails + result.generated_emails
+            all_patterns = result.found_email_patterns + result.generated_email_patterns
             all_confidences = [0.95] * len(found_emails) + result.confidence_scores
 
             # Ensure we don't exceed max_emails
             if len(all_emails) > max_emails:
                 all_emails = all_emails[:max_emails]
+                all_patterns = all_patterns[:max_emails]
                 all_confidences = all_confidences[:max_emails]
 
             return EmployeeEmailSearchResult(
                 found_emails=found_emails,
+                found_email_patterns=result.found_email_patterns,
                 generated_emails=result.generated_emails[:remaining_slots],
+                generated_email_patterns=result.generated_email_patterns[
+                    :remaining_slots
+                ],
                 confidence_scores=all_confidences,
                 reasoning=result.reasoning,
             )
@@ -213,7 +231,11 @@ class EmailGenerator:
         except Exception as e:
             print(f"LLM generation failed: {e}")
             return self._fallback_generation(
-                employee_name, company_info, essential_patterns, remaining_slots
+                employee_name,
+                company_info,
+                essential_patterns,
+                remaining_slots,
+                found_emails,
             )
 
     def _build_generation_prompt(
@@ -229,24 +251,34 @@ class EmailGenerator:
         Generate professional email addresses for "{employee_name}" at {company_info.name}.
         
         DOMAINS (priority order): {company_info.domains}
-        PATTERNS: {essential_patterns}
+        ESSENTIAL_PATTERNS: {essential_patterns}
         
-        GENERATE EXACTLY {len(combinations)} EMAILS using these combinations:
-        {chr(10).join([f"- {domain} with {pattern}" for domain, pattern in combinations])}
+        TASKS:
+        1. For FOUND EMAILS ({found_emails}):
+           - Analyze each email to determine which pattern it follows
+           - Return the actual pattern (e.g., "firstname.lastname@domain.com", "f.lastname@domain.com")
+        
+        2. GENERATE EXACTLY {len(combinations)} NEW EMAILS using these combinations:
+           {chr(10).join([f"- {domain} with {pattern}" for domain, pattern in combinations])}
         
         INSTRUCTIONS:
-        1. Parse "{employee_name}" intelligently (handle complex names, titles, etc.)
-        2. Apply patterns correctly:
-           - firstname.lastname@domain.com
-           - firstname_lastname@domain.com  
-           - firstlast@domain.com
-           - f.lastname@domain.com
-           - flast@domain.com
-           - firstname@domain.com
-           - firstl@domain.com
-        3. Assign confidence scores (0.1-1.0) based on domain preference and pattern commonality
+        - Parse "{employee_name}" intelligently (handle complex names, titles, etc.)
+        - Apply patterns correctly:
+          * first.last@domain.com
+          * firstlast@domain.com
+          * first@domain.com
+          * flast@domain.com
+          * firstl@domain.com
+          * f.last@domain.com
+          * first_last@domain.com  
+        - Assign confidence scores (0.1-1.0) based on domain preference and pattern commonality
+        - For found emails, assign confidence 0.95
+        - Return the EXACT pattern used for each email (both found and generated)
         
-        ALREADY FOUND: {found_emails} (confidence 0.95)
+        IMPORTANT: 
+        - found_email_patterns should contain the actual pattern each found email follows
+        - generated_email_patterns should contain the exact pattern used to generate each email
+        - Patterns should match the format "first.last@domain.com" etc., not arbitrary values
         """
 
     def _create_smart_combinations(
@@ -274,14 +306,24 @@ class EmailGenerator:
         company_info: CompanyInfo,
         essential_patterns: List[str],
         count: int,
+        found_emails: Optional[List[str]] = None,
     ) -> EmployeeEmailSearchResult:
         """Fallback email generation without LLM"""
+        if found_emails is None:
+            found_emails = []
+
+        found_patterns = self._analyze_found_email_patterns(
+            found_emails, essential_patterns
+        )
+
         name_parts = employee_name.lower().strip().split()
         if len(name_parts) < 2:
             return EmployeeEmailSearchResult(
-                found_emails=[],
+                found_emails=found_emails,
+                found_email_patterns=found_patterns,
                 generated_emails=[],
-                confidence_scores=[],
+                generated_email_patterns=[],
+                confidence_scores=[0.95] * len(found_emails),
                 reasoning="Insufficient name parts",
             )
 
@@ -291,17 +333,24 @@ class EmailGenerator:
         )
 
         generated_emails = []
+        generated_patterns = []
         confidences = []
 
         for i, (domain, pattern) in enumerate(combinations):
             email = self._apply_pattern(pattern, first_name, last_name, domain)
             generated_emails.append(email)
+            generated_patterns.append(pattern)
             confidences.append(max(0.1, 0.7 - i * 0.05))
 
+        # Combine all confidences
+        all_confidences = [0.95] * len(found_emails) + confidences
+
         return EmployeeEmailSearchResult(
-            found_emails=[],
+            found_emails=found_emails,
+            found_email_patterns=found_patterns,
             generated_emails=generated_emails,
-            confidence_scores=confidences,
+            generated_email_patterns=generated_patterns,
+            confidence_scores=all_confidences,
             reasoning="Fallback generation with basic name parsing",
         )
 
@@ -311,12 +360,12 @@ class EmailGenerator:
         """Apply pattern to generate email"""
         pattern_map = {
             "firstname.lastname": f"{first_name}.{last_name}",
-            "firstname": first_name,
+            "firstname_lastname": f"{first_name}_{last_name}",
             "firstlast": f"{first_name}{last_name}",
+            "f.lastname": f"{first_name[0]}.{last_name}",
             "flast": f"{first_name[0]}{last_name}",
             "firstl": f"{first_name}{last_name[0]}",
-            "f.lastname": f"{first_name[0]}.{last_name}",
-            "firstname_lastname": f"{first_name}_{last_name}",
+            "firstname": first_name,
         }
 
         template = pattern.split("@")[0] if "@" in pattern else pattern
@@ -326,7 +375,7 @@ class EmailGenerator:
 
 
 # ======================================
-# CONTACT FINDER
+# IMPROVED CONTACT FINDER
 # ======================================
 
 
@@ -495,9 +544,26 @@ class ContactFinder(ContactFinder):
         # Apply validation pipeline
         self._validate_emails(emails, company_info)
 
+        # Update company patterns with only successful ones
+        self._update_company_patterns(emails, company_info)
+
         # Sort by confidence and return
         emails.sort(key=lambda x: x.confidence, reverse=True)
         return emails[: self.config.max_emails]
+
+    def _update_company_patterns(
+        self, emails: List[Email], company_info: CompanyInfo
+    ) -> None:
+        """Update company patterns with only those that resulted in valid/risky emails"""
+        successful_patterns = {
+            email.pattern
+            for email in emails
+            if email.status in ("valid", "risky")
+            and email.pattern != "unknown@domain.com"
+        }
+
+        # Only keep patterns that were successful
+        company_info.patterns = list(successful_patterns)
 
     def _create_email_objects(
         self, email_result: EmployeeEmailSearchResult
@@ -505,23 +571,21 @@ class ContactFinder(ContactFinder):
         """Convert email results to Email objects"""
         emails = []
         all_emails = email_result.found_emails + email_result.generated_emails
+        all_patterns = (
+            email_result.found_email_patterns + email_result.generated_email_patterns
+        )
 
-        for i, (email_address, confidence) in enumerate(
-            zip(all_emails, email_result.confidence_scores)
+        for email_address, pattern, confidence in zip(
+            all_emails, all_patterns, email_result.confidence_scores
         ):
             if "@" in email_address:
                 domain = email_address.split("@")[1]
-                pattern = (
-                    "found_publicly"
-                    if i < len(email_result.found_emails)
-                    else "generated"
-                )
 
                 emails.append(
                     Email(
                         address=email_address,
                         confidence=confidence,
-                        pattern=pattern,
+                        pattern=pattern,  # Now stores the actual email pattern
                         status="unknown",
                         domain=domain,
                     )
