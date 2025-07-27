@@ -385,7 +385,7 @@ class ContactFinder(ContactFinder):
     def __init__(self, config: ContactFinderConfig):
         self.config = config
         self.llm = ChatOpenAI(
-            model="gpt-4o-mini", temperature=0, api_key=config.openai_api_key
+            model="gpt-4.1-mini", temperature=0, api_key=config.openai_api_key
         )
         self.search_api = GoogleSerperAPIWrapper() if config.serper_api_key else None
         self.email_generator = EmailGenerator(self.llm, self.search_api)
@@ -471,7 +471,6 @@ class ContactFinder(ContactFinder):
         candidate_domains = list(
             {email.split("@")[1].lower() for email in found_emails if "@" in email}
         )
-        print(found_emails)
 
         prompt = f"""
         You are an expert at identifying the official email domains for a company, including subdomains only if there is clear evidence they are used for employee or personal (named) emails.
@@ -572,30 +571,34 @@ class ContactFinder(ContactFinder):
     def _create_email_objects(
         self, email_result: EmployeeEmailSearchResult
     ) -> List[Email]:
-        """Convert email results to Email objects"""
-        emails = []
+        """Convert email results to unique Email objects, keeping highest confidence per address"""
         all_emails = email_result.found_emails + email_result.generated_emails
         all_patterns = (
             email_result.found_email_patterns + email_result.generated_email_patterns
         )
 
+        all_confidences = email_result.confidence_scores
+
+        email_map = {}
         for email_address, pattern, confidence in zip(
-            all_emails, all_patterns, email_result.confidence_scores
+            all_emails, all_patterns, all_confidences
         ):
             if "@" in email_address:
                 domain = email_address.split("@")[1]
-
-                emails.append(
-                    Email(
+                # If duplicate, keep the one with higher confidence
+                if (
+                    email_address not in email_map
+                    or confidence > email_map[email_address].confidence
+                ):
+                    email_map[email_address] = Email(
                         address=email_address,
                         confidence=confidence,
-                        pattern=pattern,  # Now stores the actual email pattern
+                        pattern=pattern,
                         status="unknown",
                         domain=domain,
                     )
-                )
 
-        return emails
+        return list(email_map.values())
 
     def _validate_emails(self, emails: List[Email], company_info: CompanyInfo) -> None:
         """Apply validation pipeline to emails"""
