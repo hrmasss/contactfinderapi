@@ -120,7 +120,7 @@ class EmailUtils:
 
 
 # ======================================
-# SMART EMAIL GENERATION ENGINE
+# EMAIL GENERATION ENGINE
 # ======================================
 
 
@@ -422,9 +422,7 @@ class ContactFinder(ContactFinder):
             company_name, context_str
         )
 
-        return self._extract_company_info(
-            company_name, context_str, search_results, found_emails
-        )
+        return self._extract_company_info(company_name, context_str, found_emails)
 
     def _build_context_string(self, context: Optional[Dict]) -> str:
         """Build context string from provided context"""
@@ -465,43 +463,46 @@ class ContactFinder(ContactFinder):
         self,
         company_name: str,
         context_str: str,
-        search_results: str,
         found_emails: List[str],
     ) -> CompanyInfo:
-        """Extract structured company information using LLM"""
+        """Extract structured company information using LLM, allowing valid subdomains."""
+
+        # Collect all unique domains (including subdomains) from found emails
+        candidate_domains = list(
+            {email.split("@")[1].lower() for email in found_emails if "@" in email}
+        )
+
         prompt = f"""
-        Analyze search results for "{company_name}"{f" with context: {context_str}" if context_str else ""}.
-        
-        IMPORTANT: Only extract domains directly associated with the target company. 
-        Use context to exclude domains from other companies.
+        You are an expert at identifying the official email domains (including subdomains if used for employee or contact emails) for a company.
+        Company: "{company_name}"{f" with context: {context_str}" if context_str else ""}
 
-        Search Results: {search_results[:2000]}
+        Candidate email domains (from found emails): {candidate_domains}
+        Found Emails: {found_emails}
 
-        Extract:
+        INSTRUCTIONS:
+        - Only select domains (including subdomains) that are clearly and officially associated with the target company, based on the email addresses and context.
+        - If a subdomain (e.g., us.domain.com, marketing.domain.com) is used for employee or contact emails and fits the company context, include it.
+        - Ignore domains that are not clearly for the target company, even if they appear in scraped emails.
+        - If you are unsure, prefer to return fewer domains.
+        - Also extract the official website URL and a brief company description (1-2 sentences).
+
+        Return:
         1. Official website URL (must match target company)
-        2. Brief company description (1-2 sentences)
-        3. Likely email domains (only if clearly for correct company)
+        2. Brief company description
+        3. List of likely email domains (including subdomains if appropriate)
+        4. For each selected domain, a short justification for why it is associated with the target company.
         """
 
         try:
             structured_llm = self.llm.with_structured_output(CompanyResearchResult)
             result = structured_llm.invoke(prompt)
 
-            # Process domains
+            # Use the domains as returned by the LLM
             clean_domains = [
-                clean_domain
+                domain.strip().lower()
                 for domain in result.likely_domains
-                if (clean_domain := EmailUtils.extract_domain(domain))
+                if domain and "." in domain
             ]
-
-            # Add domains from found emails
-            for email in found_emails:
-                if "@" in email:
-                    domain = email.split("@")[1]
-                    if domain not in clean_domains and EmailUtils.is_business_email(
-                        email
-                    ):
-                        clean_domains.append(domain)
 
             return CompanyInfo(
                 name=company_name,
