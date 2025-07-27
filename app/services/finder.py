@@ -393,16 +393,17 @@ class ContactFinder(ContactFinder):
 
     def _create_validators(self) -> List[EmailValidator]:
         """Create validation pipeline"""
-        validator_map = {
-            self.config.enable_mx_validation: MXValidator,
-            self.config.enable_domain_validation: DomainValidator,
-            self.config.enable_email_checker: EmailCheckerValidator,
-            self.config.enable_email_bounceback: lambda: EmailBounceValidator(
-                config=self.config
-            ),
-        }
+        validators = []
 
-        return [validator() for enabled, validator in validator_map.items() if enabled]
+        if self.config.enable_mx_validation:
+            validators.append(MXValidator())
+        if self.config.enable_domain_validation:
+            validators.append(DomainValidator())
+        if self.config.enable_email_checker:
+            validators.append(EmailCheckerValidator())
+        if self.config.enable_email_bounceback:
+            validators.append(EmailBounceValidator(config=self.config))
+        return validators
 
     def find_company_info(
         self, company_name: str, context: Optional[Dict] = None

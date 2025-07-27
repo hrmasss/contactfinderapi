@@ -137,7 +137,8 @@ def bounce_status_callback(email: str, status: str, company_info=None):
         await EmployeeEmail.filter(address=email).update(status=status)
 
     try:
-        asyncio.create_task(update_status())
+        loop = asyncio.get_running_loop()
+        loop.create_task(update_status())
     except RuntimeError:
         asyncio.run(update_status())
 
