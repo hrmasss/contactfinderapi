@@ -473,25 +473,24 @@ class ContactFinder(ContactFinder):
         )
 
         prompt = f"""
-        You are an expert at identifying the official email domains for a company, including subdomains only if there is clear evidence they are used for employee or personal (named) emails.
+        You are an expert at identifying the official email domains for a company, including subdomains ONLY when there is STRONG evidence they are used for employee emails.
 
         Company: "{company_name}"{f" with context: {context_str}" if context_str else ""}
+        Candidate email domains (from found emails): {candidate_domains[:3]}
+        Found Emails: {found_emails[:10]}
 
-        Candidate email domains (from found emails): {candidate_domains}
-        Found Emails: {found_emails}
-
-        INSTRUCTIONS:
-        - Only select domains (including subdomains) that are clearly and officially associated with the target company, based on the email addresses and context.
-        - Include a subdomain (e.g., us.domain.com, marketing.domain.com) ONLY if at least one employee or personal (named) email uses it (e.g., jane.doe@us.domain.com). Do NOT include subdomains that are only used for generic, support, info, or marketing addresses unless there is evidence of employee usage.
-        - Ignore domains that are not clearly for the target company, even if they appear in scraped emails.
-        - If you are unsure, prefer to return fewer domains.
-        - Also extract the official website URL and a brief company description (1-2 sentences).
+        CRITICAL INSTRUCTIONS:
+        - ONLY select domains (including subdomains) that are clearly associated with the target company FOR EMPLOYEE EMAILS.
+        - INCLUDE subdomains (e.g., us.domain.com, hr.domain.com) ONLY IF:
+            * There is DIRECT EVIDENCE (e.g., an email like "firstname.lastname@us.domain.com" or "jdoe@us.domain.com" found in the provided emails or reliable research).
+        - DO NOT include a subdomain just because:
+            * It exists or resolves.
+        - IGNORE domains/subdomains that are clearly generic email services, disposable email providers, or unrelated entities, even if an email containing the company name was found there.
 
         Return:
         1. Official website URL (must match target company)
         2. Brief company description
-        3. List of likely email domains (including subdomains if appropriate)
-        4. For each selected domain, a short justification for why it is associated with the target company.
+        3. List of likely email domains (including subdomains ONLY if they meet the strict criteria above)
         """
 
         try:
