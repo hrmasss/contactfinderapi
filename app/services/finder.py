@@ -471,9 +471,11 @@ class ContactFinder(ContactFinder):
         candidate_domains = list(
             {email.split("@")[1].lower() for email in found_emails if "@" in email}
         )
+        print(found_emails)
 
         prompt = f"""
-        You are an expert at identifying the official email domains (including subdomains if used for employee or contact emails) for a company.
+        You are an expert at identifying the official email domains for a company, including subdomains only if there is clear evidence they are used for employee or personal (named) emails.
+
         Company: "{company_name}"{f" with context: {context_str}" if context_str else ""}
 
         Candidate email domains (from found emails): {candidate_domains}
@@ -481,7 +483,7 @@ class ContactFinder(ContactFinder):
 
         INSTRUCTIONS:
         - Only select domains (including subdomains) that are clearly and officially associated with the target company, based on the email addresses and context.
-        - If a subdomain (e.g., us.domain.com, marketing.domain.com) is used for employee or contact emails and fits the company context, include it.
+        - Include a subdomain (e.g., us.domain.com, marketing.domain.com) ONLY if at least one employee or personal (named) email uses it (e.g., jane.doe@us.domain.com). Do NOT include subdomains that are only used for generic, support, info, or marketing addresses unless there is evidence of employee usage.
         - Ignore domains that are not clearly for the target company, even if they appear in scraped emails.
         - If you are unsure, prefer to return fewer domains.
         - Also extract the official website URL and a brief company description (1-2 sentences).
