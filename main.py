@@ -7,8 +7,14 @@ from app.models import get_tortoise_config
 from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
 from tortoise.contrib.fastapi import RegisterTortoise
-from app.api import create_api, bounce_status_callback
-from app.services import ContactFinderConfig, create_contact_finder
+from app.api import create_api
+from app.services import (
+    ContactFinderConfig,
+    create_contact_finder,
+    init_scheduler,
+    start_scheduler,
+    shutdown_scheduler,
+)
 
 
 # Load environment variables
@@ -17,9 +23,16 @@ load_dotenv()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Manage database lifecycle using RegisterTortoise"""
+    """Manage database and bounce service lifecycle"""
     db_url = os.getenv("DATABASE_URL", "sqlite://db.sqlite3")
     config = get_tortoise_config(db_url)
+
+    # Initialize scheduler and register bounce callbacks
+    scheduler = init_scheduler()
+    from app.services.validators import EmailBounceValidator
+
+    scheduler.register_callback("send_bounce_email", EmailBounceValidator.send_bounce_email)
+    scheduler.register_callback("check_bounce_status", EmailBounceValidator.check_bounce_status)
 
     async with RegisterTortoise(
         app=app,
@@ -27,7 +40,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         generate_schemas=True,
         add_exception_handlers=True,
     ):
-        yield
+        # Start scheduler after DB is ready
+        await start_scheduler()
+
+        try:
+            yield
+        finally:
+            # Graceful shutdown of scheduler
+            await shutdown_scheduler()
 
 
 def create_app() -> FastAPI:
@@ -42,7 +62,6 @@ def create_app() -> FastAPI:
         enable_domain_validation=True,
         enable_email_checker=True,
         enable_email_bounceback=True,
-        bounce_callback=bounce_status_callback,
         max_emails=20,
     )
 

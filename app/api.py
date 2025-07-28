@@ -1,4 +1,3 @@
-import asyncio
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 from .services import CompanyInfo, ContactResult
@@ -126,21 +125,6 @@ def filter_emails_by_status(emails, status_level):
         status_level = "risky"
     min_idx = allowed.index(status_level)
     return [e for e in emails if e.status in allowed[: min_idx + 1]]
-
-
-def bounce_status_callback(email: str, status: str, company_info=None):
-    """
-    Update the EmployeeEmail status for the given email address.
-    """
-
-    async def update_status():
-        await EmployeeEmail.filter(address=email).update(status=status)
-
-    try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(update_status())
-    except RuntimeError:
-        asyncio.run(update_status())
 
 
 # ======================================

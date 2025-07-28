@@ -105,6 +105,28 @@ class EmployeeEmail(Model):
         )
 
 
+class EmailBounceCheck(Model):
+    """Bounce check tracking"""
+
+    id = fields.IntField(primary_key=True)
+    email_record = fields.ForeignKeyField(
+        "models.EmployeeEmail", related_name="bounce_checks", unique=True
+    )
+    status = fields.CharField(
+        max_length=20, default="pending"
+    )  # pending, valid, invalid, failed
+
+    initiated_at = fields.DatetimeField(auto_now_add=True)
+    completed_at = fields.DatetimeField(null=True)
+    retry_count = fields.IntField(default=0)
+
+    class Meta:
+        table = "email_bounce_checks"
+
+    def __str__(self):
+        return f"{self.email_record.address} ({self.status})"
+
+
 # Database configuration
 def get_tortoise_config(db_url: str = "sqlite://db.sqlite3", testing: bool = False):
     """Generate Tortoise ORM configuration"""

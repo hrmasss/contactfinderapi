@@ -1,7 +1,13 @@
 import os
+import logging
 import requests
 import dns.resolver
+from datetime import datetime
 from .core import EmailValidator, CompanyInfo
+from ..models import EmailBounceCheck, EmployeeEmail
+
+
+logger = logging.getLogger(__name__)
 
 
 class MXValidator(EmailValidator):
@@ -94,57 +100,202 @@ class EmailCheckerValidator(EmailValidator):
 
 
 class EmailBounceValidator(EmailValidator):
-    """Validator that triggers a bounce check email, but does not block or change status immediately."""
+    """Bounce validator with integrated scheduling"""
 
     @property
     def name(self) -> str:
         return "email_bounce"
 
-    def __init__(self, config=None):
-        import logging
-
-        self.callback = getattr(config, "bounce_callback", None) if config else None
-        self.logger = logging.getLogger("EmailBounceValidator")
-
     def validate(self, email: str, company_info: CompanyInfo = None) -> str:
-        from os import getenv
-        import requests
-        import time
-        import threading
+        """Queue bounce check without blocking"""
+        import asyncio
 
-        def send_and_check(email, company_info):
-            api_key = getenv("EMAIL_BOUNCE_API_KEY")
-            if not api_key or not email or "@" not in email:
-                return
-            headers = {"Email-API-Key": api_key}
-            data = {"recipient_email": email}
-            try:
-                resp = requests.post(
-                    "http://194.113.195.63:8000/send-email/",
-                    headers=headers,
-                    json=data,
-                    timeout=5,
+        try:
+            # Queue the bounce check
+            loop = asyncio.get_event_loop()
+            loop.create_task(self._queue_bounce_check(email))
+        except Exception:
+            pass  # Fail silently if service not available
+
+        return None  # Don't change status immediately
+
+    async def _queue_bounce_check(self, email: str):
+        """Queue a bounce check using EmployeeEmail FK"""
+        from .scheduler import get_scheduler
+
+        # Find the EmployeeEmail record
+        email_record = await EmployeeEmail.filter(address=email).first()
+        if not email_record:
+            logger.debug(
+                f"No EmployeeEmail record found for {email}, skipping bounce check"
+            )
+            return
+
+        # Check if already processed or pending
+        existing = await EmailBounceCheck.filter(
+            email_record=email_record, status__in=["pending", "valid", "invalid"]
+        ).first()
+
+        if existing:
+            logger.debug(f"Bounce check for {email} already exists: {existing.status}")
+            return
+
+        # Create bounce check record
+        bounce_check = await EmailBounceCheck.create(
+            email_record=email_record, status="pending"
+        )
+
+        # Schedule immediate bounce email send
+        scheduler = get_scheduler()
+        scheduler.schedule_delayed_task(
+            "send_bounce_email",
+            0,  # Immediate
+            f"bounce_send_{bounce_check.id}",
+            bounce_check.id,
+        )
+
+        logger.info(f"Queued bounce check for {email}")
+
+    @staticmethod
+    async def send_bounce_email(bounce_check_id: int):
+        """Send bounce email and schedule status check"""
+        from .scheduler import get_scheduler
+
+        bounce_check = await EmailBounceCheck.get(id=bounce_check_id).prefetch_related(
+            "email_record"
+        )
+        api_key = os.getenv("EMAIL_BOUNCE_API_KEY")
+
+        if not api_key:
+            await EmailBounceValidator._mark_failed(
+                bounce_check, "No EMAIL_BOUNCE_API_KEY"
+            )
+            return
+
+        try:
+            # Send bounce email
+            response = requests.post(
+                "http://194.113.195.63:8000/send-email/",
+                headers={"Email-API-Key": api_key},
+                json={"recipient_email": bounce_check.email_record.address},
+                timeout=10,
+            )
+
+            if response.status_code == 200 and response.json().get("mail_sent"):
+                # Schedule status check after 5 minutes
+                scheduler = get_scheduler()
+                scheduler.schedule_delayed_task(
+                    "check_bounce_status",
+                    5,  # 5 minutes
+                    f"bounce_check_{bounce_check.id}",
+                    bounce_check.id,
                 )
-                if resp.status_code == 200 and resp.json().get("mail_sent"):
-                    time.sleep(300)
-                    status_resp = requests.get(
-                        "http://194.113.195.63:8000/check-status/",
-                        headers=headers,
-                        params={"recipient_email": email},
-                        timeout=5,
-                    )
-                    if status_resp.status_code == 200:
-                        result = status_resp.json()
-                        status = result.get("status")
-                        if status in ("valid", "invalid"):
-                            if self.callback:
-                                self.callback(email, status, company_info)
-                            else:
-                                self.logger.warning(
-                                    "No bounce_callback provided in config; skipping additional steps."
-                                )
-            except Exception:
-                pass
+                logger.info(
+                    f"Bounce email sent for {bounce_check.email_record.address}"
+                )
+            else:
+                await EmailBounceValidator._mark_failed(
+                    bounce_check, f"Send failed: {response.status_code}"
+                )
 
-        threading.Thread(target=send_and_check, args=(email, company_info)).start()
-        return None
+        except Exception as e:
+            await EmailBounceValidator._mark_failed(
+                bounce_check, f"Send error: {str(e)}"
+            )
+
+    @staticmethod
+    async def check_bounce_status(bounce_check_id: int):
+        """Check bounce status and update results"""
+        bounce_check = await EmailBounceCheck.get(id=bounce_check_id).prefetch_related(
+            "email_record__employee__company"
+        )
+        api_key = os.getenv("EMAIL_BOUNCE_API_KEY")
+
+        try:
+            response = requests.get(
+                "http://194.113.195.63:8000/check-status/",
+                headers={"Email-API-Key": api_key},
+                params={"recipient_email": bounce_check.email_record.address},
+                timeout=10,
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                status = result.get("status")
+
+                if status in ("valid", "invalid"):
+                    # Update bounce check
+                    bounce_check.status = status
+                    bounce_check.completed_at = datetime.now()
+                    await bounce_check.save()
+
+                    # Update email record status
+                    bounce_check.email_record.status = status
+                    await bounce_check.email_record.save()
+
+                    # Update company patterns if valid
+                    if status == "valid":
+                        await EmailBounceValidator._update_company_patterns(
+                            bounce_check.email_record
+                        )
+
+                    logger.info(
+                        f"Bounce check completed: {bounce_check.email_record.address} -> {status}"
+                    )
+                else:
+                    # Retry if status is still pending
+                    await EmailBounceValidator._retry_check(bounce_check)
+            else:
+                await EmailBounceValidator._retry_check(bounce_check)
+
+        except Exception as e:
+            await EmailBounceValidator._retry_check(bounce_check, str(e))
+
+    @staticmethod
+    async def _update_company_patterns(email_record: EmployeeEmail):
+        """Update company patterns based on validated email pattern"""
+        if email_record.pattern:
+            company = email_record.employee.company
+            if email_record.pattern not in company.patterns:
+                company.patterns = company.patterns + [email_record.pattern]
+                await company.save()
+                logger.info(
+                    f"Added pattern '{email_record.pattern}' to company {company.name}"
+                )
+
+    @staticmethod
+    async def _retry_check(bounce_check, error: str = None):
+        """Retry bounce status check with exponential backoff"""
+        from .scheduler import get_scheduler
+
+        bounce_check.retry_count += 1
+        max_retries = 3  # Simple constant
+
+        if bounce_check.retry_count < max_retries:
+            # Retry after exponential backoff
+            delay_minutes = 2**bounce_check.retry_count
+            scheduler = get_scheduler()
+            scheduler.schedule_delayed_task(
+                "check_bounce_status",
+                delay_minutes,
+                f"bounce_retry_{bounce_check.id}_{bounce_check.retry_count}",
+                bounce_check.id,
+            )
+            await bounce_check.save()
+            logger.info(
+                f"Retrying bounce check for {bounce_check.email_record.address} in {delay_minutes}m"
+            )
+        else:
+            await EmailBounceValidator._mark_failed(
+                bounce_check, f"Max retries exceeded. Last error: {error}"
+            )
+
+    @staticmethod
+    async def _mark_failed(bounce_check, error: str):
+        """Mark bounce check as failed"""
+        bounce_check.status = "failed"
+        bounce_check.completed_at = datetime.now()
+        await bounce_check.save()
+        logger.warning(
+            f"Bounce check failed for {bounce_check.email_record.address}: {error}"
+        )

@@ -1,5 +1,5 @@
-from typing import List, Callable, Optional, Dict, Any
 from pydantic import BaseModel, Field, ConfigDict
+from typing import List, Optional, Dict
 from abc import ABC, abstractmethod
 
 
@@ -92,8 +92,6 @@ class ContactFinderConfig(BaseModel):
     enable_domain_validation: bool = True
     enable_email_checker: bool = True
     enable_email_bounceback: bool = True
-    # Optional callback for bounce status updates
-    bounce_callback: Optional[Callable[..., Any]] = None
 
     # Generation settings
     max_emails: int = 20
