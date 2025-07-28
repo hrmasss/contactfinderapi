@@ -102,33 +102,74 @@ class EmailCheckerValidator(EmailValidator):
 class EmailBounceValidator(EmailValidator):
     """Bounce validator with integrated scheduling"""
 
+    def __init__(self, on_email_saved_callback=None):
+        """Initialize with optional callback for when emails are saved to DB"""
+        self.on_email_saved_callback = on_email_saved_callback
+        self._pending_emails = []  # Store emails to process later
+
     @property
     def name(self) -> str:
         return "email_bounce"
 
     def validate(self, email: str, company_info: CompanyInfo = None) -> str:
-        """Queue bounce check without blocking"""
-        import asyncio
-
-        try:
-            # Queue the bounce check
-            loop = asyncio.get_event_loop()
-            loop.create_task(self._queue_bounce_check(email))
-        except Exception:
-            pass  # Fail silently if service not available
+        """Queue bounce check or defer until callback"""
+        if self.on_email_saved_callback:
+            # Store email for later processing via callback
+            self._pending_emails.append(email)
+        else:
+            # Try immediate processing (legacy behavior)
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+                loop.create_task(self._queue_bounce_check_delayed(email))
+            except Exception as e:
+                logger.debug(f"Failed to queue bounce check for {email}: {e}")
 
         return None  # Don't change status immediately
+
+    async def process_pending_emails(self):
+        """Process all pending emails (called by callback)"""
+        for email in self._pending_emails:
+            await self._queue_bounce_check(email)
+        self._pending_emails.clear()
+
+    async def process_emails_for_employee(self, employee_db_id: int):
+        """Process bounce validation for all risky emails of an employee"""
+        from ..models import EmployeeEmail
+        
+        risky_emails = await EmployeeEmail.filter(
+            employee_id=employee_db_id, status="risky"
+        ).all()
+        
+        logger.info(f"Processing bounce validation for {len(risky_emails)} risky emails")
+        
+        for email_record in risky_emails:
+            await self._queue_bounce_check(email_record.address)
+
+    async def _queue_bounce_check_delayed(self, email: str):
+        """Queue a bounce check with delay to allow DB save"""
+        import asyncio
+        # Wait a bit for the email to be saved to database
+        await asyncio.sleep(0.5)
+        await self._queue_bounce_check(email)
 
     async def _queue_bounce_check(self, email: str):
         """Queue a bounce check using EmployeeEmail FK"""
         from .scheduler import get_scheduler
 
+        logger.info(f"Attempting to queue bounce check for {email}")
+
         # Find the EmployeeEmail record
         email_record = await EmployeeEmail.filter(address=email).first()
         if not email_record:
-            logger.debug(
+            logger.warning(
                 f"No EmployeeEmail record found for {email}, skipping bounce check"
             )
+            return
+
+        # Only process risky emails for bounce checking
+        if email_record.status != "risky":
+            logger.info(f"Email {email} has status '{email_record.status}', not 'risky', skipping bounce check")
             return
 
         # Check if already processed or pending
@@ -154,7 +195,7 @@ class EmailBounceValidator(EmailValidator):
             bounce_check.id,
         )
 
-        logger.info(f"Queued bounce check for {email}")
+        logger.info(f"Queued bounce check for {email} (ID: {bounce_check.id})")
 
     @staticmethod
     async def send_bounce_email(bounce_check_id: int):

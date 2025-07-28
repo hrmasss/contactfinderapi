@@ -385,7 +385,7 @@ class ContactFinder(ContactFinder):
     def __init__(self, config: ContactFinderConfig):
         self.config = config
         self.llm = ChatOpenAI(
-            model="gpt-4.1-mini", temperature=0, api_key=config.openai_api_key
+            model="gpt-4o-mini", temperature=0, api_key=config.openai_api_key
         )
         self.search_api = GoogleSerperAPIWrapper() if config.serper_api_key else None
         self.email_generator = EmailGenerator(self.llm, self.search_api)
@@ -402,7 +402,7 @@ class ContactFinder(ContactFinder):
         if self.config.enable_email_checker:
             validators.append(EmailCheckerValidator())
         if self.config.enable_email_bounceback:
-            validators.append(EmailBounceValidator(config=self.config))
+            validators.append(EmailBounceValidator(self.config.bounce_callback))
         return validators
 
     def find_company_info(

@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional, Dict
+from pydantic import BaseModel, Field, ConfigDict, SkipValidation
+from typing import List, Optional, Dict, Callable, Any
 from abc import ABC, abstractmethod
 
 
@@ -81,7 +81,7 @@ class EmailValidator(ABC):
 class ContactFinderConfig(BaseModel):
     """Configuration using Pydantic Settings"""
 
-    model_config = ConfigDict(env_prefix="CONTACTFINDER_")
+    model_config = ConfigDict(env_prefix="CONTACTFINDER_", arbitrary_types_allowed=True)
 
     serper_api_key: Optional[str] = None
     openai_api_key: Optional[str] = None
@@ -92,6 +92,7 @@ class ContactFinderConfig(BaseModel):
     enable_domain_validation: bool = True
     enable_email_checker: bool = True
     enable_email_bounceback: bool = True
+    bounce_callback: Optional[SkipValidation[Callable[..., Any]]] = None
 
     # Generation settings
     max_emails: int = 20

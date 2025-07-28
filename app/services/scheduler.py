@@ -7,6 +7,26 @@ from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 
 logger = logging.getLogger(__name__)
 
+# Global registry for scheduler callbacks
+_callback_registry = {}
+
+
+async def _execute_scheduled_callback(callback_name: str, *args, **kwargs):
+    """Standalone function to execute scheduled callbacks"""
+    try:
+        if callback_name not in _callback_registry:
+            logger.error(f"Callback '{callback_name}' not found in registry")
+            return
+
+        callback = _callback_registry[callback_name]
+        if hasattr(callback, "__call__"):
+            result = callback(*args, **kwargs)
+            # Handle async callbacks
+            if hasattr(result, "__await__"):
+                await result
+    except Exception as e:
+        logger.error(f"Callback '{callback_name}' failed: {e}")
+
 
 class TaskScheduler:
     """Generic task scheduler with persistence"""
@@ -18,7 +38,7 @@ class TaskScheduler:
 
     def _setup_scheduler(self):
         """Setup APScheduler with SQLite persistence"""
-        jobstore = SQLAlchemyJobStore(url="sqlite:///scheduler_jobs.sqlite")
+        jobstore = SQLAlchemyJobStore(url="sqlite:///jobs.sqlite3")
         self.scheduler = AsyncIOScheduler(
             jobstores={"default": jobstore},
             job_defaults={"coalesce": True, "max_instances": 3},
@@ -39,6 +59,7 @@ class TaskScheduler:
     def register_callback(self, name: str, callback: Callable):
         """Register a callback function"""
         self.callbacks[name] = callback
+        _callback_registry[name] = callback
 
     def schedule_task(
         self, callback_name: str, run_at: datetime, task_id: str, *args, **kwargs
@@ -48,7 +69,7 @@ class TaskScheduler:
             raise ValueError(f"Callback '{callback_name}' not registered")
 
         job = self.scheduler.add_job(
-            self._execute_callback,
+            _execute_scheduled_callback,
             "date",
             run_date=run_at,
             args=[callback_name] + list(args),
@@ -64,18 +85,6 @@ class TaskScheduler:
         """Schedule a task with delay"""
         run_at = datetime.now() + timedelta(minutes=delay_minutes)
         return self.schedule_task(callback_name, run_at, task_id, *args, **kwargs)
-
-    async def _execute_callback(self, callback_name: str, *args, **kwargs):
-        """Execute registered callback safely"""
-        try:
-            callback = self.callbacks[callback_name]
-            if hasattr(callback, "__call__"):
-                result = callback(*args, **kwargs)
-                # Handle async callbacks
-                if hasattr(result, "__await__"):
-                    await result
-        except Exception as e:
-            logger.error(f"Callback '{callback_name}' failed: {e}")
 
     def cancel_task(self, task_id: str) -> bool:
         """Cancel a scheduled task"""

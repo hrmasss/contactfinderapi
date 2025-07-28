@@ -59,6 +59,7 @@ staticfiles/
 media/
 db.sqlite3
 db.sqlite3*
+*.sqlite3
 local_settings.py
 
 # Environment 

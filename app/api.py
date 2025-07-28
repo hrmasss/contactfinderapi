@@ -114,6 +114,27 @@ async def save_employee_emails_to_cache(
     return employee
 
 
+async def trigger_bounce_validation_for_risky_emails(employee):
+    """Background task to trigger bounce validation for risky emails"""
+    try:
+        from .services.validators import EmailBounceValidator
+        
+        risky_emails = await EmployeeEmail.filter(
+            employee=employee, status="risky"
+        ).all()
+        
+        if risky_emails:
+            print(f"🔥 Triggering bounce validation for {len(risky_emails)} risky emails")
+            validator = EmailBounceValidator()
+            for email_record in risky_emails:
+                await validator._queue_bounce_check(email_record.address)
+        else:
+            print("ℹ️  No risky emails found to bounce validate")
+            
+    except Exception as e:
+        print(f"❌ Error in bounce validation trigger: {e}")
+
+
 # ======================================
 # UTILITY FUNCTIONS
 # ======================================
@@ -233,12 +254,7 @@ def create_api(finder) -> FastAPI:
             # Save all emails to cache (before filtering)
             all_emails = list(result.emails)
 
-            # Filter emails by status_level for API response only
-            result.emails = filter_emails_by_status(
-                result.emails, getattr(request, "status_level", "risky")
-            )
-
-            # Save to cache in background
+            # Save to cache
             if request.use_cache and all_emails:
                 if not company_cache:
                     company_db = await save_company_to_cache(result.company)
@@ -246,12 +262,18 @@ def create_api(finder) -> FastAPI:
                     company_db = await get_cached_company(company_name)
 
                 if company_db:
-                    background_tasks.add_task(
-                        save_employee_emails_to_cache,
+                    employee = await save_employee_emails_to_cache(
                         company_db,
                         employee_name,
                         all_emails,
                     )
+                    # Trigger bounce validation for risky emails
+                    background_tasks.add_task(trigger_bounce_validation_for_risky_emails, employee)
+
+            # Filter emails by status_level
+            result.emails = filter_emails_by_status(
+                result.emails, getattr(request, "status_level", "risky")
+            )
 
             return EmployeeResponse(
                 success=True,
