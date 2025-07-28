@@ -119,6 +119,7 @@ class EmailBounceValidator(EmailValidator):
         else:
             # Try immediate processing (legacy behavior)
             import asyncio
+
             try:
                 loop = asyncio.get_event_loop()
                 loop.create_task(self._queue_bounce_check_delayed(email))
@@ -136,19 +137,22 @@ class EmailBounceValidator(EmailValidator):
     async def process_emails_for_employee(self, employee_db_id: int):
         """Process bounce validation for all risky emails of an employee"""
         from ..models import EmployeeEmail
-        
+
         risky_emails = await EmployeeEmail.filter(
             employee_id=employee_db_id, status="risky"
         ).all()
-        
-        logger.info(f"Processing bounce validation for {len(risky_emails)} risky emails")
-        
+
+        logger.info(
+            f"Processing bounce validation for {len(risky_emails)} risky emails"
+        )
+
         for email_record in risky_emails:
             await self._queue_bounce_check(email_record.address)
 
     async def _queue_bounce_check_delayed(self, email: str):
         """Queue a bounce check with delay to allow DB save"""
         import asyncio
+
         # Wait a bit for the email to be saved to database
         await asyncio.sleep(0.5)
         await self._queue_bounce_check(email)
@@ -162,14 +166,16 @@ class EmailBounceValidator(EmailValidator):
         # Find the EmployeeEmail record
         email_record = await EmployeeEmail.filter(address=email).first()
         if not email_record:
-            logger.warning(
+            logger.debug(
                 f"No EmployeeEmail record found for {email}, skipping bounce check"
             )
             return
 
         # Only process risky emails for bounce checking
         if email_record.status != "risky":
-            logger.info(f"Email {email} has status '{email_record.status}', not 'risky', skipping bounce check")
+            logger.info(
+                f"Email {email} has status '{email_record.status}', not 'risky', skipping bounce check"
+            )
             return
 
         # Check if already processed or pending

@@ -118,19 +118,20 @@ async def trigger_bounce_validation_for_risky_emails(employee):
     """Background task to trigger bounce validation for risky emails"""
     try:
         from .services.validators import EmailBounceValidator
-        
+
         risky_emails = await EmployeeEmail.filter(
             employee=employee, status="risky"
         ).all()
-        
+
         if risky_emails:
-            print(f"🔥 Triggering bounce validation for {len(risky_emails)} risky emails")
+            print(
+                f"🔥 Triggering bounce validation for {len(risky_emails)} risky emails"
+            )
             validator = EmailBounceValidator()
-            for email_record in risky_emails:
-                await validator._queue_bounce_check(email_record.address)
+            await validator.process_emails_for_employee(employee.id)
         else:
             print("ℹ️  No risky emails found to bounce validate")
-            
+
     except Exception as e:
         print(f"❌ Error in bounce validation trigger: {e}")
 
@@ -268,7 +269,9 @@ def create_api(finder) -> FastAPI:
                         all_emails,
                     )
                     # Trigger bounce validation for risky emails
-                    background_tasks.add_task(trigger_bounce_validation_for_risky_emails, employee)
+                    background_tasks.add_task(
+                        trigger_bounce_validation_for_risky_emails, employee
+                    )
 
             # Filter emails by status_level
             result.emails = filter_emails_by_status(
