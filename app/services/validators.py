@@ -233,11 +233,10 @@ class EmailBounceValidator(EmailValidator):
                     bounce_check.email_record.status = status
                     await bounce_check.email_record.save()
 
-                    # Update company patterns if valid
-                    if status == "valid":
-                        await EmailBounceValidator._update_company_patterns(
-                            bounce_check.email_record
-                        )
+                    # Always reevaluate company patterns after status change
+                    await EmailBounceValidator._reevaluate_company_patterns(
+                        bounce_check.email_record.employee.company
+                    )
 
                     logger.info(
                         f"Bounce check completed: {bounce_check.email_record.address} -> {status}"
@@ -252,16 +251,42 @@ class EmailBounceValidator(EmailValidator):
             await EmailBounceValidator._retry_check(bounce_check, str(e))
 
     @staticmethod
-    async def _update_company_patterns(email_record: EmployeeEmail):
-        """Update company patterns based on validated email pattern"""
-        if email_record.pattern:
-            company = email_record.employee.company
-            if email_record.pattern not in company.patterns:
-                company.patterns = company.patterns + [email_record.pattern]
-                await company.save()
-                logger.info(
-                    f"Added pattern '{email_record.pattern}' to company {company.name}"
-                )
+    async def _reevaluate_company_patterns(company):
+        """Reevaluate company patterns from all valid/risky employee emails"""
+        # Get all valid/risky emails for this company
+        valid_emails = await EmployeeEmail.filter(
+            employee__company=company,
+            status__in=["valid", "risky"],
+            pattern__not="",  # Only emails with patterns
+        ).all()
+
+        # Extract unique patterns
+        patterns = set()
+        for email in valid_emails:
+            if email.pattern and email.pattern.strip():
+                patterns.add(email.pattern.strip())
+
+        # Update company patterns (overwrite, don't append)
+        new_patterns = sorted(list(patterns))  # Convert to sorted list for consistency
+        if company.patterns != new_patterns:
+            old_patterns = company.patterns.copy()
+            company.patterns = new_patterns
+            await company.save()
+
+            logger.info(
+                f"Updated company {company.name} patterns: {old_patterns} -> {new_patterns}"
+            )
+
+    @staticmethod
+    async def reevaluate_all_company_patterns():
+        """Reevaluate patterns for all companies (maintenance utility)"""
+        from ..models import Company
+
+        companies = await Company.all()
+        for company in companies:
+            await EmailBounceValidator._reevaluate_company_patterns(company)
+
+        logger.info(f"Reevaluated patterns for {len(companies)} companies")
 
     @staticmethod
     async def _retry_check(bounce_check, error: str = None):
