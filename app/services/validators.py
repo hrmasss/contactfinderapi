@@ -225,7 +225,7 @@ class EmailBounceValidator(EmailValidator):
                 "http://194.113.195.63:8000/send-email/",
                 headers={"Email-API-Key": api_key},
                 json={"recipient_email": bounce_check.email_record.address},
-                timeout=10,
+                timeout=120,
             )
 
             if response.status_code == 200 and response.json().get("mail_sent"):
@@ -273,7 +273,7 @@ class EmailBounceValidator(EmailValidator):
                 "http://194.113.195.63:8000/check-status/",
                 headers={"Email-API-Key": api_key},
                 params={"recipient_email": bounce_check.email_record.address},
-                timeout=10,
+                timeout=120,
             )
 
             if response.status_code == 200:
