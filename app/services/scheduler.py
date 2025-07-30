@@ -41,7 +41,11 @@ class TaskScheduler:
         jobstore = SQLAlchemyJobStore(url="sqlite:///jobs.sqlite3")
         self.scheduler = AsyncIOScheduler(
             jobstores={"default": jobstore},
-            job_defaults={"coalesce": True, "max_instances": 3},
+            job_defaults={
+                "coalesce": False,
+                "max_instances": 1,
+                "misfire_grace_time": 300,
+            },
         )
 
     async def start(self):

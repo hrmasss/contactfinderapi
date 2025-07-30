@@ -229,11 +229,11 @@ class EmailBounceValidator(EmailValidator):
             )
 
             if response.status_code == 200 and response.json().get("mail_sent"):
-                # Schedule status check after 5 minutes
+                # Schedule status check after 8 minutes
                 scheduler = get_scheduler()
                 scheduler.schedule_delayed_task(
                     "check_bounce_status",
-                    5,  # 5 minutes
+                    8,  # 8 minutes as required
                     f"bounce_check_{bounce_check.id}",
                     bounce_check.id,
                 )
@@ -253,10 +253,20 @@ class EmailBounceValidator(EmailValidator):
     @staticmethod
     async def check_bounce_status(bounce_check_id: int):
         """Check bounce status and update results"""
-        bounce_check = await EmailBounceCheck.get(id=bounce_check_id).prefetch_related(
-            "email_record__employee__company"
-        )
+        try:
+            bounce_check = await EmailBounceCheck.get(
+                id=bounce_check_id
+            ).prefetch_related("email_record__employee__company")
+        except Exception as e:
+            logger.error(f"Failed to load bounce check {bounce_check_id}: {e}")
+            return
+
         api_key = os.getenv("EMAIL_BOUNCE_API_KEY")
+        if not api_key:
+            await EmailBounceValidator._mark_failed(
+                bounce_check, "No EMAIL_BOUNCE_API_KEY"
+            )
+            return
 
         try:
             response = requests.get(
@@ -290,11 +300,22 @@ class EmailBounceValidator(EmailValidator):
                     )
                 else:
                     # Retry if status is still pending
+                    logger.info(
+                        f"Status still pending for {bounce_check.email_record.address}, retrying..."
+                    )
                     await EmailBounceValidator._retry_check(bounce_check)
             else:
-                await EmailBounceValidator._retry_check(bounce_check)
+                logger.warning(
+                    f"API error {response.status_code} for {bounce_check.email_record.address}"
+                )
+                await EmailBounceValidator._retry_check(
+                    bounce_check, f"API error: {response.status_code}"
+                )
 
         except Exception as e:
+            logger.error(
+                f"Exception checking bounce status for {bounce_check.email_record.address}: {e}"
+            )
             await EmailBounceValidator._retry_check(bounce_check, str(e))
 
     @staticmethod

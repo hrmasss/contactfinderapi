@@ -27,12 +27,13 @@ AFTER_CSV = f"reports/api_bounce_test_after_{TIMESTAMP}.csv"
 
 # Test timing
 REQUEST_DELAY = 1.0  # Seconds between requests
-BOUNCE_WAIT_TIME = 600  # 10 minutes wait for bounce checks
+BOUNCE_WAIT_TIME = 720  # 12 minutes wait for bounce checks (8 min + 4 min buffer)
 STATUS_CHECK_INTERVAL = 10  # Check every 10 seconds
 
 # ========================
 # API CLIENT
 # ========================
+
 
 class ContactFinderAPIClient:
     """Async HTTP client for ContactFinder API"""
@@ -76,9 +77,11 @@ class ContactFinderAPIClient:
                 error_text = await response.text()
                 raise Exception(f"API error {response.status}: {error_text}")
 
+
 # ========================
 # DATABASE MONITORING
 # ========================
+
 
 async def check_api_health(base_url: str) -> bool:
     """Check if FastAPI server is running"""
@@ -89,10 +92,12 @@ async def check_api_health(base_url: str) -> bool:
     except Exception:
         return False
 
+
 async def get_scheduled_jobs_count():
     """Get count of scheduled bounce jobs"""
     try:
         import sqlite3
+
         conn = sqlite3.connect("jobs.sqlite3")
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM apscheduler_jobs")
@@ -102,6 +107,7 @@ async def get_scheduled_jobs_count():
     except Exception as e:
         print(f"⚠️  Could not check jobs: {e}")
         return None
+
 
 async def get_bounce_status_from_db():
     """Get bounce check status directly from database"""
@@ -127,6 +133,7 @@ async def get_bounce_status_from_db():
         print(f"⚠️  Could not check DB status: {e}")
         return None, None
 
+
 async def get_email_bounce_status(email_address):
     """Get bounce status for a specific email"""
     try:
@@ -136,23 +143,26 @@ async def get_email_bounce_status(email_address):
         email_record = await EmployeeEmail.filter(address=email_address).first()
         if not email_record:
             return None  # Email not in database
-        
+
         # Get bounce check status
         bounce_check = await EmailBounceCheck.filter(email_record=email_record).first()
         if not bounce_check:
             return None  # No bounce check initiated
-            
+
         return {
             "email": email_address,
             "bounce_status": bounce_check.status,
             "email_status": email_record.status,
-            "completed": bounce_check.status in ["valid", "invalid", "failed"]
+            "completed": bounce_check.status in ["valid", "invalid", "failed"],
         }
     except Exception as e:
         print(f"⚠️  Could not check status for {email_address}: {e}")
         return None
 
-async def update_csv_with_bounce_result(csv_file, fieldnames, email_address, new_status, old_status):
+
+async def update_csv_with_bounce_result(
+    csv_file, fieldnames, email_address, new_status, old_status
+):
     """Update CSV file in real-time when a bounce result comes in"""
     try:
         # Read current CSV content
@@ -160,7 +170,7 @@ async def update_csv_with_bounce_result(csv_file, fieldnames, email_address, new
         with open(csv_file, "r", newline="", encoding="utf-8") as infile:
             reader = csv.DictReader(infile)
             rows = list(reader)
-        
+
         # Update rows that contain this email
         updated = False
         for row in rows:
@@ -169,8 +179,12 @@ async def update_csv_with_bounce_result(csv_file, fieldnames, email_address, new
                 original_emails = row["employee_emails"]
                 if original_emails:
                     updated_email_parts = []
-                    email_parts = original_emails.split(";") if ";" in original_emails else [original_emails]
-                    
+                    email_parts = (
+                        original_emails.split(";")
+                        if ";" in original_emails
+                        else [original_emails]
+                    )
+
                     for email_part in email_parts:
                         if email_address in email_part and "(" in email_part:
                             # Replace the status in this email part
@@ -178,23 +192,29 @@ async def update_csv_with_bounce_result(csv_file, fieldnames, email_address, new
                             if addr == email_address:
                                 conf_part = email_part.split("(")[1]
                                 confidence = conf_part.split(" - ")[0]
-                                updated_email_parts.append(f"{addr} ({confidence} - {new_status})")
-                                
+                                updated_email_parts.append(
+                                    f"{addr} ({confidence} - {new_status})"
+                                )
+
                                 # Update bounce_changes field
                                 current_changes = row.get("bounce_changes", "")
-                                change_text = f"{email_address}: {old_status}→{new_status}"
+                                change_text = (
+                                    f"{email_address}: {old_status}→{new_status}"
+                                )
                                 if current_changes in ["pending", "no_changes", ""]:
                                     row["bounce_changes"] = change_text
                                 else:
-                                    row["bounce_changes"] = f"{current_changes}; {change_text}"
+                                    row["bounce_changes"] = (
+                                        f"{current_changes}; {change_text}"
+                                    )
                                 updated = True
                             else:
                                 updated_email_parts.append(email_part)
                         else:
                             updated_email_parts.append(email_part)
-                    
+
                     row["employee_emails"] = ";".join(updated_email_parts)
-        
+
         # Write updated CSV back to file
         if updated:
             with open(csv_file, "w", newline="", encoding="utf-8") as outfile:
@@ -202,17 +222,20 @@ async def update_csv_with_bounce_result(csv_file, fieldnames, email_address, new
                 writer.writeheader()
                 writer.writerows(rows)
             print(f"📝 Updated CSV with: {email_address} → {new_status}")
-        
+
     except Exception as e:
         print(f"⚠️  Could not update CSV for {email_address}: {e}")
+
 
 # ========================
 # TEST LOGIC
 # ========================
 
+
 def parse_context(row):
     """Parse context from CSV row"""
     return {"location": row.get("context_location", "")}
+
 
 def extract_emails_from_response(response_data):
     """Extract email info from API response"""
@@ -224,9 +247,11 @@ def extract_emails_from_response(response_data):
         (email["address"], email["confidence"], email["status"]) for email in emails
     ]
 
+
 def format_emails_for_csv(emails):
     """Format emails for CSV output"""
     return ";".join(f"{addr} ({conf:.2f} - {status})" for addr, conf, status in emails)
+
 
 async def run_api_bounce_test():
     """Main test function using API endpoints with real-time CSV updates"""
@@ -343,8 +368,8 @@ async def run_api_bounce_test():
         writer = csv.DictWriter(outfile, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(before_results)
-    
-    # Create the after CSV with initial pending status  
+
+    # Create the after CSV with initial pending status
     with open(AFTER_CSV, "w", newline="", encoding="utf-8") as outfile:
         writer = csv.DictWriter(outfile, fieldnames=fieldnames)
         writer.writeheader()
@@ -357,16 +382,18 @@ async def run_api_bounce_test():
     print(f"✅ Before results saved: {BEFORE_CSV}")
     print(f"✅ After results initialized: {AFTER_CSV} (will update in real-time)")
     print(f"📧 Total unique emails found: {len(all_email_addresses)}")
-    
+
     # Check if any jobs were scheduled
     jobs_count = await get_scheduled_jobs_count()
     if jobs_count is not None:
         print(f"📅 Scheduled bounce jobs: {jobs_count}")
         if jobs_count == 0:
-            print("⚠️  WARNING: No bounce jobs were scheduled! This indicates the bounce validator didn't trigger.")
+            print(
+                "⚠️  WARNING: No bounce jobs were scheduled! This indicates the bounce validator didn't trigger."
+            )
         else:
             print("✅ Bounce jobs were scheduled successfully")
-    
+
     # Also check bounce records
     pending, completed = await get_bounce_status_from_db()
     if pending is not None:
@@ -374,26 +401,30 @@ async def run_api_bounce_test():
 
     # Phase 2: Real-time bounce validation monitoring with CSV updates
     print("\n⚡ Phase 2: Real-time bounce validation monitoring...")
-    
+
     if all_email_addresses:
-        print(f"🔍 Monitoring {len(all_email_addresses)} emails for bounce completion...")
+        print(
+            f"🔍 Monitoring {len(all_email_addresses)} emails for bounce completion..."
+        )
         print(f"⏱️  Max wait time: {BOUNCE_WAIT_TIME} seconds")
         print(f"📝 Results updating in real-time: {AFTER_CSV}")
-        
+
         start_time = asyncio.get_event_loop().time()
         completed_emails = set()
         total_changes = 0
-        
+
         while True:
             elapsed = asyncio.get_event_loop().time() - start_time
-            
+
             # Check each email that hasn't completed yet
-            pending_emails = [email for email in all_email_addresses if email not in completed_emails]
-            
+            pending_emails = [
+                email for email in all_email_addresses if email not in completed_emails
+            ]
+
             if not pending_emails:
                 print("✅ All target emails have been processed!")
                 break
-                
+
             # Check status of pending emails
             newly_completed = []
             for email in pending_emails:
@@ -401,35 +432,45 @@ async def run_api_bounce_test():
                 if status and status["completed"]:
                     completed_emails.add(email)
                     newly_completed.append(email)
-                    
+
                     # Get original status and new status
                     old_status = email_original_statuses.get(email, "unknown")
-                    new_status = status['email_status']
-                    
-                    print(f"✅ {email}: {status['bounce_status']} (email status: {old_status} → {new_status})")
-                    
+                    new_status = status["email_status"]
+
+                    print(
+                        f"✅ {email}: {status['bounce_status']} (email status: {old_status} → {new_status})"
+                    )
+
                     # Update CSV immediately if status changed
                     if old_status != new_status:
-                        await update_csv_with_bounce_result(AFTER_CSV, fieldnames, email, new_status, old_status)
+                        await update_csv_with_bounce_result(
+                            AFTER_CSV, fieldnames, email, new_status, old_status
+                        )
                         total_changes += 1
                         print(f"📝 CSV updated with change #{total_changes}")
-            
+
             # Show progress
             total_completed = len(completed_emails)
             total_pending = len(pending_emails) - len(newly_completed)
-            print(f"📊 Progress: {total_completed}/{len(all_email_addresses)} completed, {total_pending} pending, {total_changes} changes (elapsed: {elapsed:.1f}s)")
-            
+            print(
+                f"📊 Progress: {total_completed}/{len(all_email_addresses)} completed, {total_pending} pending, {total_changes} changes (elapsed: {elapsed:.1f}s)"
+            )
+
             # Check timeout
             if elapsed > BOUNCE_WAIT_TIME:
                 print(f"⏰ Timeout reached ({BOUNCE_WAIT_TIME}s)")
-                print(f"📋 Final status: {total_completed} completed, {total_pending} still pending")
+                print(
+                    f"📋 Final status: {total_completed} completed, {total_pending} still pending"
+                )
                 break
-            
+
             # Wait before next check
             await asyncio.sleep(STATUS_CHECK_INTERVAL)
-        
+
         completed_count = len(completed_emails)
-        print(f"🎯 Final summary: {completed_count}/{len(all_email_addresses)} emails completed, {total_changes} status changes detected")
+        print(
+            f"🎯 Final summary: {completed_count}/{len(all_email_addresses)} emails completed, {total_changes} status changes detected"
+        )
     else:
         print("⚠️  No emails to monitor")
         completed_count = 0
@@ -442,6 +483,7 @@ async def run_api_bounce_test():
     print(f"🔄 Detected {total_changes} email status changes")
     print(f"📁 Before: {BEFORE_CSV}")
     print(f"📁 After:  {AFTER_CSV} (updated in real-time)")
+
 
 if __name__ == "__main__":
     asyncio.run(run_api_bounce_test())
